@@ -1,118 +1,212 @@
-# WIP Fineuning repo for chatterbox tts
-Use the provided finetuning scripts to finetune chatterbox t3 and s3/flow model.
 
-# Usage
+# Chatterbox TTS Finetuning
 
-```
+### Fine-tuning Models
+
+Fine-tune Chatterbox models on your own datasets to specialize for specific voices, accents, or languages:
+
+#### Fine-tune T3 Model
+
+```bash
 cd src
-```
 
-```
 python finetune_t3.py \
---output_dir ./checkpoints/chatterbox_finetuned_yodas \
---model_name_or_path ResembleAI/chatterbox \
---dataset_name MrDragonFox/DE_Emilia_Yodas_680h \
---train_split_name train \
---eval_split_size 0.0002 \
---num_train_epochs 1 \
---per_device_train_batch_size 4 \
---gradient_accumulation_steps 2 \
---learning_rate 5e-5 \
---warmup_steps 100 \
---logging_steps 10 \
---eval_strategy steps \
---eval_steps 2000 \
---save_strategy steps \
---save_steps 4000 \
---save_total_limit 4 \
---fp16 True \
---report_to tensorboard \
---dataloader_num_workers 8 \
---do_train --do_eval \
---dataloader_pin_memory False \
---eval_on_start True \
---label_names labels_speech \
---text_column_name text_scribe
+  --output_dir ./checkpoints/chatterbox_finetuned \
+  --model_name_or_path ResembleAI/chatterbox \
+  --dataset_name YOUR_DATASET_NAME \
+  --train_split_name train \
+  --eval_split_size 0.0002 \
+  --num_train_epochs 1 \
+  --per_device_train_batch_size 4 \
+  --gradient_accumulation_steps 2 \
+  --learning_rate 5e-5 \
+  --warmup_steps 100 \
+  --logging_steps 10 \
+  --eval_strategy steps \
+  --eval_steps 2000 \
+  --save_strategy steps \
+  --save_steps 4000 \
+  --save_total_limit 4 \
+  --fp16 True \
+  --report_to tensorboard \
+  --dataloader_num_workers 8 \
+  --do_train --do_eval \
+  --dataloader_pin_memory False \
+  --eval_on_start True \
+  --label_names labels_speech \
+  --text_column_name text_scribe
 ```
 
-
-
-
-<img width="1200" alt="cb-big2" src="https://github.com/user-attachments/assets/bd8c5f03-e91d-4ee5-b680-57355da204d1" />
-
-# Chatterbox TTS
-
-[![Alt Text](https://img.shields.io/badge/listen-demo_samples-blue)](https://resemble-ai.github.io/chatterbox_demopage/)
-[![Alt Text](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/ResembleAI/Chatterbox)
-[![Alt Text](https://static-public.podonos.com/badges/insight-on-pdns-sm-dark.svg)](https://podonos.com/resembleai/chatterbox)
-[![Discord](https://img.shields.io/discord/1377773249798344776?label=join%20discord&logo=discord&style=flat)](https://discord.gg/XqS7RxUp)
-
-_Made with ♥️ by <a href="https://resemble.ai" target="_blank"><img width="100" alt="resemble-logo-horizontal" src="https://github.com/user-attachments/assets/35cf756b-3506-4943-9c72-c05ddfa4e525" /></a>
-
-We're excited to introduce Chatterbox, [Resemble AI's](https://resemble.ai) first production-grade open source TTS model. Licensed under MIT, Chatterbox has been benchmarked against leading closed-source systems like ElevenLabs, and is consistently preferred in side-by-side evaluations.
-
-Whether you're working on memes, videos, games, or AI agents, Chatterbox brings your content to life. It's also the first open source TTS model to support **emotion exaggeration control**, a powerful feature that makes your voices stand out. Try it now on our [Hugging Face Gradio app.](https://huggingface.co/spaces/ResembleAI/Chatterbox)
-
-If you like the model but need to scale or tune it for higher accuracy, check out our competitively priced TTS service (<a href="https://resemble.ai">link</a>). It delivers reliable performance with ultra-low latency of sub 200ms—ideal for production use in agents, applications, or interactive media.
-
-# Key Details
-- SoTA zeroshot TTS
-- 0.5B Llama backbone
-- Unique exaggeration/intensity control
-- Ultra-stable with alignment-informed inference
-- Trained on 0.5M hours of cleaned data
-- Watermarked outputs
-- Easy voice conversion script
-- [Outperforms ElevenLabs](https://podonos.com/resembleai/chatterbox)
-
-# Tips
-- **General Use (TTS and Voice Agents):**
-  - The default settings (`exaggeration=0.5`, `cfg_weight=0.5`) work well for most prompts.
-  - If the reference speaker has a fast speaking style, lowering `cfg_weight` to around `0.3` can improve pacing.
-
-- **Expressive or Dramatic Speech:**
-  - Try lower `cfg_weight` values (e.g. `~0.3`) and increase `exaggeration` to around `0.7` or higher.
-  - Higher `exaggeration` tends to speed up speech; reducing `cfg_weight` helps compensate with slower, more deliberate pacing.
-
-
-# Installation
-```
-pip install chatterbox-tts
+**Example with specific dataset**:
+```bash
+# Fine-tune on German voice dataset
+python finetune_t3.py \
+  --output_dir ./checkpoints/chatterbox_finetuned_yodas \
+  --model_name_or_path ResembleAI/chatterbox \
+  --dataset_name MrDragonFox/DE_Emilia_Yodas_680h \
+  --train_split_name train \
+  --num_train_epochs 1 \
+  --per_device_train_batch_size 4 \
+  --gradient_accumulation_steps 2 \
+  --learning_rate 5e-5 \
+  --fp16 True \
+  --do_train --do_eval
 ```
 
+For detailed fine-tuning instructions, see [Fine-tuning Guide](#fine-tuning-guide).
 
-# Usage
+### Voice Conversion
+
+Convert existing audio to a different voice:
+
 ```python
+from chatterbox.vc import VoiceConverter
 import torchaudio as ta
+
+# Load voice converter
+converter = VoiceConverter.from_pretrained(device="cuda")
+
+# Convert source audio to target voice
+source_audio = "source_voice.wav"
+target_voice_reference = "target_voice_sample.wav"
+
+converted = converter.convert(
+    source_audio,
+    voice_reference=target_voice_reference
+)
+ta.save("converted_output.wav", converted, converter.sr)
+```
+
+See [voice_conversion.py](voice_conversion.py) and [example_vc.py](example_vc.py) for more examples.
+
+### Advanced Configuration
+
+Control speech characteristics with configuration parameters:
+
+```python
 from chatterbox.tts import ChatterboxTTS
 
 model = ChatterboxTTS.from_pretrained(device="cuda")
 
-text = "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the enemy's Nexus in an epic late-game pentakill."
-wav = model.generate(text)
-ta.save("test-1.wav", wav, model.sr)
+# General use - default settings work well
+wav = model.generate(
+    text="Your text here",
+    exaggeration=0.5,  # Emotion intensity (0.0-1.0)
+    cfg_weight=0.5     # Classifier-free guidance weight
+)
 
-# If you want to synthesize with a different voice, specify the audio prompt
-AUDIO_PROMPT_PATH="YOUR_FILE.wav"
-wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
-ta.save("test-2.wav", wav, model.sr)
+# Expressive/dramatic speech
+wav = model.generate(
+    text="A dramatic announcement!",
+    exaggeration=0.7,   # Higher emotion intensity
+    cfg_weight=0.3      # Lower CFG for slower, more deliberate pacing
+)
+
+# Fast-speaking reference voice adjustment
+wav = model.generate(
+    text="Quick paced speech",
+    audio_prompt_path="fast_speaker.wav",
+    cfg_weight=0.3      # Lower CFG improves pacing
+)
 ```
-See `example_tts.py` for more examples.
 
-# Acknowledgements
-- [Cosyvoice](https://github.com/FunAudioLLM/CosyVoice)
-- [Real-Time-Voice-Cloning](https://github.com/CorentinJ/Real-Time-Voice-Cloning)
-- [HiFT-GAN](https://github.com/yl4579/HiFTNet)
-- [Llama 3](https://github.com/meta-llama/llama3)
-- [S3Tokenizer](https://github.com/xingchensong/S3Tokenizer)
+---
 
-# Built-in PerTh Watermarking for Responsible AI
+## Configuration
 
-Every audio file generated by Chatterbox includes [Resemble AI's Perth (Perceptual Threshold) Watermarker](https://github.com/resemble-ai/perth) - imperceptible neural watermarks that survive MP3 compression, audio editing, and common manipulations while maintaining nearly 100% detection accuracy.
+### Parameter Reference
 
-# Official Discord
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `exaggeration` | float | 0.5 | Emotion/intensity exaggeration (0.0-1.0). Higher values increase expressiveness. |
+| `cfg_weight` | float | 0.5 | Classifier-free guidance weight (0.0-1.0). Lower values slow down speech. |
+| `temperature` | float | 1.0 | Generation temperature. Higher values increase diversity. |
+| `device` | str | "cuda" | Device for inference: "cuda", "cpu", or "mps" (Apple Silicon). |
 
-👋 Join us on [Discord](https://discord.gg/XqS7RxUp) and let's build something awesome together!
+### Performance Tips
 
-# Disclaimer
-Don't use this model to do bad things. Prompts are sourced from freely available data on the internet.
+- **General Use**: Default settings (`exaggeration=0.5`, `cfg_weight=0.5`) work well for most prompts
+- **Fast-Speaking Reference**: Lower `cfg_weight` to ~0.3 to improve pacing
+- **Expressive Speech**: Increase `exaggeration` to 0.7+ and lower `cfg_weight` to ~0.3
+- **Speed Control**: Higher `exaggeration` speeds up speech; lower `cfg_weight` slows it down
+
+---
+
+## Fine-tuning Guide
+
+### Dataset Preparation
+
+Your dataset should be in one of these formats:
+
+1. **Hugging Face Dataset** with columns:
+   - `audio`: Audio file path or bytes
+   - `text` or `text_scribe`: Transcription
+   - `labels_speech` (optional): Speech labels for training
+
+2. **Local Dataset** with structure:
+   ```
+   dataset/
+   ├── metadata.csv    # columns: filename, transcription
+   └── audio/
+       ├── file1.wav
+       ├── file2.wav
+       └── ...
+   ```
+
+### Fine-tuning T3 Model
+
+The T3 model handles text-to-speech token prediction:
+
+```bash
+python src/finetune_t3.py \
+  --output_dir ./checkpoints/my_finetuned_model \
+  --model_name_or_path ResembleAI/chatterbox \
+  --dataset_name path/to/dataset \
+  --num_train_epochs 3 \
+  --per_device_train_batch_size 4 \
+  --learning_rate 5e-5 \
+  --fp16 True \
+  --do_train --do_eval
+```
+
+### Fine-tuning S3Gen Model
+
+The S3Gen model generates speech features:
+
+```bash
+python src/finetune_s3gen.py \
+  --output_dir ./checkpoints/s3gen_finetuned \
+  --model_name_or_path ResembleAI/chatterbox \
+  --dataset_name path/to/dataset \
+  --num_train_epochs 5 \
+  --per_device_train_batch_size 2 \
+  --learning_rate 1e-4
+```
+
+### Monitoring Training
+
+View training progress with TensorBoard:
+
+```bash
+tensorboard --logdir ./checkpoints/your_model_dir
+```
+
+### Using Fine-tuned Models
+
+Load your fine-tuned model:
+
+```python
+from chatterbox.tts import ChatterboxTTS
+
+# Load fine-tuned model
+model = ChatterboxTTS.from_pretrained(
+    "path/to/checkpoints/your_model",
+    device="cuda"
+)
+
+# Generate speech
+wav = model.generate("Test with your fine-tuned model")
+```
+--
+
+

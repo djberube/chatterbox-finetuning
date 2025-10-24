@@ -1,5 +1,37 @@
+"""
+Chatterbox Text-to-Speech (TTS) Module
+
+This module provides the main interface for the Chatterbox TTS system, a production-grade
+text-to-speech model with zero-shot voice cloning capabilities and emotion exaggeration control.
+
+The module includes:
+- ChatterboxTTS: Main TTS class for generating speech from text with reference audio
+- Conditionals: Data structure for managing model conditioning parameters
+- punc_norm: Text normalization utility for improving synthesis quality
+
+Key Features:
+- Zero-shot voice cloning from audio prompts
+- Emotion/intensity exaggeration control
+- Built-in Perth watermarking for responsible AI
+- Support for classifier-free guidance (CFG)
+- Configurable temperature for generation diversity
+
+Example:
+    >>> import torchaudio as ta
+    >>> from chatterbox.tts import ChatterboxTTS
+    >>>
+    >>> model = ChatterboxTTS.from_pretrained(device="cuda")
+    >>> text = "Hello, this is a test of the Chatterbox TTS system."
+    >>> wav = model.generate(text, audio_prompt_path="reference.wav")
+    >>> ta.save("output.wav", wav, model.sr)
+
+For more information, see the Chatterbox repository:
+https://github.com/resemble-ai/chatterbox
+"""
+
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional, Union
 
 import librosa
 import torch
@@ -21,8 +53,28 @@ REPO_ID = "ResembleAI/chatterbox"
 
 def punc_norm(text: str) -> str:
     """
-        Quick cleanup func for punctuation from LLMs or
-        containing chars not seen often in the dataset
+    Normalize text punctuation for improved TTS synthesis quality.
+
+    This function performs several text cleanup operations to handle punctuation
+    from LLMs or uncommon characters not frequently seen in the training dataset.
+
+    Operations performed:
+    - Capitalizes the first letter if lowercase
+    - Removes multiple consecutive spaces
+    - Replaces uncommon punctuation (ellipsis, em-dash, curly quotes, etc.)
+    - Adds a period if no sentence-ending punctuation exists
+
+    Args:
+        text: The input text string to normalize
+
+    Returns:
+        The normalized text with cleaned punctuation
+
+    Example:
+        >>> punc_norm("hello world...")
+        'Hello world, '
+        >>> punc_norm("this is a test")
+        'This is a test.'
     """
     if len(text) == 0:
         return "You need to add some text for me to talk."
@@ -64,31 +116,66 @@ def punc_norm(text: str) -> str:
 @dataclass
 class Conditionals:
     """
-    Conditionals for T3 and S3Gen
-    - T3 conditionals:
-        - speaker_emb
-        - clap_emb
-        - cond_prompt_speech_tokens
-        - cond_prompt_speech_emb
-        - emotion_adv
-    - S3Gen conditionals:
-        - prompt_token
-        - prompt_token_len
-        - prompt_feat
-        - prompt_feat_len
-        - embedding
+    Conditioning parameters for T3 and S3Gen models.
+
+    This dataclass encapsulates all conditioning information required for the
+    Chatterbox TTS pipeline, including both the T3 (text-to-speech tokens) model
+    and the S3Gen (speech tokens to waveform) model.
+
+    Attributes:
+        t3: T3Cond instance containing T3 model conditioning:
+            - speaker_emb: Voice encoder speaker embedding
+            - clap_emb: CLAP audio-text embedding (optional)
+            - cond_prompt_speech_tokens: Speech tokens from reference audio prompt
+            - cond_prompt_speech_emb: Speech embedding from reference audio prompt
+            - emotion_adv: Emotion/intensity exaggeration scalar (0.0-1.0)
+
+        gen: Dictionary containing S3Gen model conditioning:
+            - prompt_token: Reference audio tokens for vocoder
+            - prompt_token_len: Length of prompt tokens
+            - prompt_feat: Reference audio features
+            - prompt_feat_len: Length of prompt features
+            - embedding: Additional embedding information
+
+    Methods:
+        to(device): Move all conditioning tensors to specified device
+        save(fpath): Save conditioning parameters to file
+        load(fpath, map_location): Load conditioning parameters from file
+
+    Example:
+        >>> conds = Conditionals(t3_cond, gen_dict)
+        >>> conds = conds.to("cuda")
+        >>> conds.save(Path("my_voice.pt"))
     """
     t3: T3Cond
     gen: dict
 
-    def to(self, device):
+    def to(self, device: Union[str, torch.device]) -> 'Conditionals':
+        """
+        Move all conditioning tensors to the specified device.
+
+        Args:
+            device: Target device ('cpu', 'cuda', 'mps', or torch.device instance)
+
+        Returns:
+            Self for method chaining
+        """
         self.t3 = self.t3.to(device=device)
         for k, v in self.gen.items():
             if torch.is_tensor(v):
                 self.gen[k] = v.to(device=device)
         return self
 
-    def save(self, fpath: Path):
+    def save(self, fpath: Path) -> None:
+        """
+        Save conditioning parameters to a file.
+
+        Args:
+            fpath: Path where the conditioning parameters will be saved
+
+        Example:
+            >>> conds.save(Path("my_custom_voice.pt"))
+        """
         arg_dict = dict(
             t3=self.t3.__dict__,
             gen=self.gen
@@ -96,7 +183,20 @@ class Conditionals:
         torch.save(arg_dict, fpath)
 
     @classmethod
-    def load(cls, fpath, map_location="cpu"):
+    def load(cls, fpath: Union[str, Path], map_location: Union[str, torch.device] = "cpu") -> 'Conditionals':
+        """
+        Load conditioning parameters from a file.
+
+        Args:
+            fpath: Path to the saved conditioning parameters file
+            map_location: Device to load tensors to (default: "cpu")
+
+        Returns:
+            Conditionals instance with loaded parameters
+
+        Example:
+            >>> conds = Conditionals.load("my_custom_voice.pt", map_location="cuda")
+        """
         if isinstance(map_location, str):
             map_location = torch.device(map_location)
         kwargs = torch.load(fpath, map_location=map_location, weights_only=True)
@@ -104,8 +204,44 @@ class Conditionals:
 
 
 class ChatterboxTTS:
-    ENC_COND_LEN = 6 * S3_SR
-    DEC_COND_LEN = 10 * S3GEN_SR
+    """
+    Main Chatterbox Text-to-Speech synthesis class.
+
+    This class provides the primary interface for the Chatterbox TTS system, enabling
+    high-quality zero-shot voice cloning with emotion exaggeration control and built-in
+    watermarking for responsible AI usage.
+
+    The synthesis pipeline consists of:
+    1. Text normalization and tokenization
+    2. T3 model: Text → Speech tokens with voice/emotion conditioning
+    3. S3Gen model: Speech tokens → Waveform with reference audio conditioning
+    4. Perth watermarking: Adding imperceptible neural watermarks
+
+    Class Attributes:
+        ENC_COND_LEN: Length of audio for encoder conditioning (6 seconds at 16kHz)
+        DEC_COND_LEN: Length of audio for decoder conditioning (10 seconds at 24kHz)
+
+    Attributes:
+        sr: Output audio sample rate (24kHz)
+        t3: T3 transformer model for text-to-speech token generation
+        s3gen: S3Gen model for speech token to waveform generation
+        ve: Voice encoder for extracting speaker embeddings
+        tokenizer: Text tokenizer for converting text to tokens
+        device: Computation device ('cpu', 'cuda', or 'mps')
+        conds: Conditioning parameters (optional, loaded from reference audio)
+        watermarker: Perth watermarker for adding neural watermarks
+
+    Example:
+        >>> model = ChatterboxTTS.from_pretrained(device="cuda")
+        >>> wav = model.generate(
+        ...     "Hello, this is a test.",
+        ...     audio_prompt_path="reference.wav",
+        ...     exaggeration=0.7,
+        ...     cfg_weight=0.5
+        ... )
+    """
+    ENC_COND_LEN = 6 * S3_SR  # 6 seconds at 16kHz for encoder conditioning
+    DEC_COND_LEN = 10 * S3GEN_SR  # 10 seconds at 24kHz for decoder conditioning
 
     def __init__(
         self,
@@ -114,8 +250,19 @@ class ChatterboxTTS:
         ve: VoiceEncoder,
         tokenizer: EnTokenizer,
         device: str,
-        conds: Conditionals = None,
+        conds: Optional[Conditionals] = None,
     ):
+        """
+        Initialize ChatterboxTTS with model components.
+
+        Args:
+            t3: Initialized T3 transformer model
+            s3gen: Initialized S3Gen vocoder model
+            ve: Initialized voice encoder model
+            tokenizer: Text tokenizer instance
+            device: Target computation device
+            conds: Pre-computed conditioning parameters (optional)
+        """
         self.sr = S3GEN_SR  # sample rate of synthesized audio
         self.t3 = t3
         self.s3gen = s3gen
